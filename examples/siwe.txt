@@ -1,0 +1,10 @@
+app.example.com wants you to sign in with your Ethereum account:
+0x5f37b2286c06CD6956eE9558d0ee3eC79f3F2b9e
+
+Sign in to Example.
+
+URI: https://app.example.com
+Version: 1
+Chain ID: 56
+Nonce: 8f3k2j
+Issued At: 2026-10-26T15:00:00Z

@@ -1,0 +1,16 @@
+{
+  "name": "signread",
+  "version": "0.1.0",
+  "description": "Read a wallet signature request before you sign it: decodes permits, Permit2, Seaport orders, approvals and messages, flags drains, and explains them with a local open-weight model.",
+  "type": "module",
+  "bin": { "signread": "bin/signread.js" },
+  "main": "src/decode.js",
+  "scripts": { "test": "node --test test/signread.test.js" },
+  "engines": { "node": ">=18" },
+  "keywords": ["evm", "eip-712", "permit", "permit2", "seaport", "phishing", "wallet-security", "ollama", "open-source-ai", "web3", "cli"],
+  "author": "Unikii (https://github.com/DaddyUnikii)",
+  "license": "MIT",
+  "files": ["bin", "src", "README.md", "LICENSE"],
+  "repository": { "type": "git", "url": "git+https://github.com/DaddyUnikii/signread.git" },
+  "homepage": "https://github.com/DaddyUnikii/signread#readme"
+}

@@ -1,0 +1,40 @@
+{
+  "types": {},
+  "primaryType": "OrderComponents",
+  "domain": {
+    "name": "Seaport",
+    "version": "1.6",
+    "chainId": 1,
+    "verifyingContract": "0x0000000000000068F116a894984e2DB1123eB395"
+  },
+  "message": {
+    "offerer": "0x5f37b2286c06CD6956eE9558d0ee3eC79f3F2b9e",
+    "offer": [
+      {
+        "itemType": 2,
+        "token": "0xBC4CA0EdA7647A8aB7C2061c2E118A18a936f13D",
+        "identifierOrCriteria": "1234",
+        "startAmount": "1",
+        "endAmount": "1"
+      }
+    ],
+    "consideration": [
+      {
+        "itemType": 0,
+        "token": "0x0000000000000000000000000000000000000000",
+        "identifierOrCriteria": "0",
+        "startAmount": "1",
+        "endAmount": "1",
+        "recipient": "0x9d4e1fAbe2c3D8A0b0dF0C6F1A2e3B4c5D6e7F80"
+      }
+    ],
+    "startTime": "1793000000",
+    "endTime": "115792089237316195423570985008687907853269984665640564039457584007913129639935",
+    "orderType": 0,
+    "zone": "0x0000000000000000000000000000000000000000",
+    "zoneHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+    "salt": "1",
+    "conduitKey": "0x0000000000000000000000000000000000000000000000000000000000000000",
+    "counter": "0"
+  }
+}
