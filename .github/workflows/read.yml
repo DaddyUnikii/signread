@@ -1,0 +1,58 @@
+name: Read before you sign
+# Run from the Actions tab (works from your phone). Paste what your wallet asks you to sign,
+# or a link to a mint page / airdrop post / skill.md. A local open-weight model explains it.
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "sign = signature/tx payload, page = link or text of a mint page"
+        type: choice
+        options: [sign, page]
+        default: sign
+      payload:
+        description: "Payload (EIP-712 JSON, message, 0x calldata) or a https:// link for page mode"
+        required: true
+      origin:
+        description: "Site asking for the signature (optional, checks sign-in domain)"
+        required: false
+      lang:
+        description: "Explanation language"
+        type: choice
+        options: [id, en]
+        default: id
+      model:
+        description: "Open-weight model pulled by Ollama"
+        default: qwen2.5:1.5b
+jobs:
+  read:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Start Ollama
+        run: |
+          curl -fsSL https://ollama.com/install.sh -o /tmp/ollama.sh
+          sh /tmp/ollama.sh
+          (ollama serve > /tmp/ollama.log 2>&1 &)
+          for i in $(seq 1 30); do curl -s http://127.0.0.1:11434/api/tags >/dev/null && break; sleep 1; done
+          ollama pull "${{ inputs.model }}"
+      - name: Read it
+        env:
+          MODE: ${{ inputs.mode }}
+          PAYLOAD: ${{ inputs.payload }}
+          ORIGIN: ${{ inputs.origin }}
+          LANG_: ${{ inputs.lang }}
+          MODEL: ${{ inputs.model }}
+        run: |
+          printf '%s' "$PAYLOAD" > payload.txt
+          ARGS=(--ai --markdown --lang "$LANG_" --model "$MODEL")
+          [ -n "$ORIGIN" ] && ARGS+=(--origin "$ORIGIN")
+          if [ "$MODE" = page ] && [[ "$PAYLOAD" =~ ^https?:// ]]; then
+            node bin/signread.js page "$PAYLOAD" "${ARGS[@]}" | tee report.md
+          else
+            node bin/signread.js "$MODE" payload.txt "${ARGS[@]}" | tee report.md
+          fi
+          cat report.md >> "$GITHUB_STEP_SUMMARY"
