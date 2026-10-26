@@ -20,6 +20,7 @@ Options
   --host <url>         model server (default http://127.0.0.1:11434, env OLLAMA_HOST)
   --api openai         use an OpenAI-compatible server instead of Ollama
   --lang id|en         explanation language (default id)
+  --require-ai         fail instead of falling back when the model is unreachable
   --origin <site>      site asking for the signature (checks SIWE domain)
   --chain <id>         chain you are on (checks EIP-712 chainId)
   --from <address>     your address (checks transferFrom source)
@@ -33,7 +34,7 @@ function parse(argv) {
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '-h' || a === '--help') o.help = true;
-    else if (['--ai', '--json', '--markdown'].includes(a)) o[a.slice(2)] = true;
+    else if (['--ai', '--json', '--markdown', '--require-ai'].includes(a)) o[a.slice(2).replace(/-(\w)/g, (_, x) => x.toUpperCase())] = true;
     else if (a.startsWith('--')) o[a.slice(2).replace(/-(\w)/g, (_, x) => x.toUpperCase())] = argv[++i];
     else o._.push(a);
   }
@@ -66,7 +67,11 @@ async function main() {
 
   if (o.ai) {
     try { rep.ai = await explain(rep, { model: o.model, host: o.host, api: o.api, lang: o.lang || 'id' }); }
-    catch (e) { rep.ai = { model: o.model || 'qwen2.5:1.5b', text: `(AI explanation unavailable: ${e.message})` }; }
+    catch (e) {
+      if (o.requireAi || process.env.SIGNREAD_REQUIRE_AI) throw new Error(`AI explanation failed: ${e.message}`);
+      rep.ai = { model: o.model || 'qwen2.5:1.5b', text: `(AI explanation unavailable: ${e.message})` };
+    }
+    if (!rep.ai.text && (o.requireAi || process.env.SIGNREAD_REQUIRE_AI)) throw new Error('model returned an empty explanation');
   }
 
   if (o.json) process.stdout.write(JSON.stringify(rep, null, 2) + '\n');
