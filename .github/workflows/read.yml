@@ -48,7 +48,7 @@ jobs:
           MODEL: ${{ inputs.model }}
         run: |
           printf '%s' "$PAYLOAD" > payload.txt
-          ARGS=(--ai --markdown --lang "$LANG_" --model "$MODEL")
+          ARGS=(--ai --require-ai --markdown --lang "$LANG_" --model "$MODEL")
           [ -n "$ORIGIN" ] && ARGS+=(--origin "$ORIGIN")
           if [ "$MODE" = page ] && [[ "$PAYLOAD" =~ ^https?:// ]]; then
             node bin/signread.js page "$PAYLOAD" "${ARGS[@]}" | tee report.md
