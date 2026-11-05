@@ -1,6 +1,6 @@
 // Deterministic decoder: turns a signature request into findings with a risk level.
 // The AI layer only explains these findings; it never decides the verdict.
-import { KNOWN, PERMIT2, SELECTORS, MAX_UINT256, MAX_UINT160, MAX_UINT48 } from './known.js';
+import { KNOWN, PERMIT2, SELECTORS, SAFE_MULTISEND, SAFE_ADMIN, MAX_UINT256, MAX_UINT160, MAX_UINT48 } from './known.js';
 
 const RANK = { LOW: 0, MEDIUM: 1, HIGH: 2 };
 const lc = (s) => String(s ?? '').toLowerCase();
@@ -87,6 +87,8 @@ export function decodeTypedData(td, opts = {}) {
       if (m.deadline !== undefined) expiryCheck(r, m.deadline, now, 'deadline');
     }
     if (!label(m.spender)) bump(r, 'HIGH', 'spender is not a known router or marketplace');
+  } else if (pt === 'SafeTx' && 'operation' in m) {
+    r = decodeSafeTx(d, m);
   } else if (pt === 'OrderComponents' && Array.isArray(m.offer)) {
     r = base('seaport', 'Seaport order: you list items for sale');
     const offerer = lc(m.offerer);
@@ -122,6 +124,45 @@ export function decodeTypedData(td, opts = {}) {
     r.facts.push(['chain id', String(BigInt(d.chainId))]);
     if (opts.chainId && BigInt(d.chainId) !== BigInt(opts.chainId)) bump(r, 'HIGH', `chain id ${d.chainId} does not match your chain ${opts.chainId}`);
   }
+  return r;
+}
+
+// ---------- Safe (Gnosis Safe) SafeTx ----------
+// operation 1 = delegatecall: the Safe runs the target's code as itself and can rewrite
+// its own storage (owners, modules, guard, implementation). This is how Bybit lost
+// ~$1.5B in Feb 2025: signers approved what looked like a routine transfer.
+const ZERO = '0x0000000000000000000000000000000000000000';
+
+function decodeSafeTx(d, m) {
+  const op = Number(m.operation);
+  const to = lc(m.to);
+  const data = lc(m.data || '0x');
+  const sel = data.length >= 10 ? data.slice(0, 10) : '0x';
+  const lib = SAFE_MULTISEND[to];
+  const r = base('safe-tx', `Safe transaction: ${op === 1 ? 'DELEGATECALL into' : 'call to'} ${lib ? lib.name : m.to}`);
+  r.facts.push(['to', lib ? `${m.to} (${lib.name})` : who(m.to)], ['operation', op === 1 ? '1 (delegatecall)' : `${op} (call)`]);
+  if (m.value !== undefined && BigInt(m.value) > 0n) r.facts.push(['native value (wei)', BigInt(m.value).toString()]);
+  if (sel !== '0x') r.facts.push(['function', SAFE_ADMIN[sel] || SELECTORS[sel]?.name || sel]);
+
+  if (op === 1) {
+    if (!lib) bump(r, 'HIGH', 'delegatecall to a contract that is not a Safe MultiSend library: it runs with full control of the Safe and can replace owners or the implementation');
+    else if (!lib.callOnly) bump(r, 'MEDIUM', `delegatecall into ${lib.name}; batched steps can delegatecall again, so check each one`);
+    else bump(r, 'LOW', `delegatecall into ${lib.name}, the standard way to batch calls`);
+  } else if (op !== 0) {
+    bump(r, 'HIGH', `unknown operation ${m.operation}`);
+  }
+
+  const self = d.verifyingContract && to === lc(d.verifyingContract);
+  if (SAFE_ADMIN[sel] && (self || op === 1)) bump(r, 'HIGH', `${SAFE_ADMIN[sel]} changes who controls this Safe or what code it runs`);
+  if (SELECTORS[sel] && ['approve', 'setApprovalForAll', 'increaseAllowance', 'Permit2.approve'].includes(SELECTORS[sel].name)) {
+    const inner = decodeCalldata({ to: m.to, data });
+    for (const x of inner.reasons) if (x.level !== 'LOW') bump(r, x.level, `inner call: ${x.reason}`);
+  }
+  if (BigInt(m.gasPrice ?? 0) > 0n && m.refundReceiver && lc(m.refundReceiver) !== ZERO) {
+    r.facts.push(['refund receiver', who(m.refundReceiver)]);
+    bump(r, 'MEDIUM', 'pays a gas refund out of the Safe to a third party');
+  }
+  if (!r.reasons.length) bump(r, 'LOW', 'plain call from the Safe; check the recipient and amount');
   return r;
 }
 
