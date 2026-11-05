@@ -14,6 +14,28 @@ export const KNOWN = {
   '0x00000000000001ad428e4906ae43d8f9852d0dd6': 'Blur Marketplace',
 };
 
+// Safe batching libraries. A SafeTx with operation 1 (delegatecall) is expected only for these.
+// CallOnly variants cannot delegatecall again inside the batch; plain MultiSend can.
+export const SAFE_MULTISEND = {
+  '0x40a2accbd92bca938b02010e17a5b8929b49130d': { name: 'Safe MultiSendCallOnly 1.3.0', callOnly: true },
+  '0x9641d764fc13c8b624c04430c7356c1c7c8102e2': { name: 'Safe MultiSendCallOnly 1.4.1', callOnly: true },
+  '0xa238cbeb142c10ef7ad8442c6d1f9e89e07e7761': { name: 'Safe MultiSend 1.3.0', callOnly: false },
+  '0x38869bf66a61cf6bdb996a6ae40d5853fd43b526': { name: 'Safe MultiSend 1.4.1', callOnly: false },
+};
+
+// Safe self-calls that change who controls the Safe or what code it runs.
+export const SAFE_ADMIN = {
+  '0x0d582f13': 'addOwnerWithThreshold',
+  '0xf8dc5dd9': 'removeOwner',
+  '0xe318b52b': 'swapOwner',
+  '0x694e80c3': 'changeThreshold',
+  '0x610b5925': 'enableModule',
+  '0xe009cfde': 'disableModule',
+  '0xe19a9dd9': 'setGuard',
+  '0xf08a0323': 'setFallbackHandler',
+  '0x7de7edef': 'changeMasterCopy',
+};
+
 export const PERMIT2 = '0x000000000022d473030f116ddee9f6b43ac78ba3';
 
 export const SELECTORS = {

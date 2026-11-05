@@ -136,3 +136,35 @@ test('markdown report renders', () => {
   assert.match(md, /## 🔴 HIGH/);
   assert.match(md, /\| hash \|/);
 });
+
+// ---------- Safe SafeTx ----------
+const SAFE = '0x1db92e2eebc8e0c075a02bea49a2935bcd2dfcf4';
+const safeTx = (msg) => ({
+  types: { SafeTx: [] }, primaryType: 'SafeTx',
+  domain: { chainId: 1, verifyingContract: SAFE },
+  message: { value: 0, data: '0x', safeTxGas: 0, baseGas: 0, gasPrice: 0, gasToken: '0x0000000000000000000000000000000000000000', refundReceiver: '0x0000000000000000000000000000000000000000', nonce: 71, ...msg },
+});
+
+test('SafeTx delegatecall to an unknown contract is HIGH on its own', () => {
+  const r = decode(safeTx({ to: EVIL, operation: 1, data: '0xa9059cbb' + '0'.repeat(128) }));
+  assert.equal(r.kind, 'safe-tx');
+  assert.equal(r.risk, 'HIGH');
+  assert.ok(r.reasons.some((x) => /delegatecall/.test(x.reason)));
+});
+
+test('SafeTx delegatecall into MultiSendCallOnly is not HIGH', () => {
+  const r = decode(safeTx({ to: '0x40A2aCCbd92BCA938b02010E17A5b8929b49130D', operation: 1, data: '0x8d80ff0a' }));
+  assert.equal(r.kind, 'safe-tx');
+  assert.notEqual(r.risk, 'HIGH');
+});
+
+test('SafeTx plain call (operation 0) with no data is LOW', () => {
+  const r = decode(safeTx({ to: EVIL, operation: 0, value: '1000000000000000000' }));
+  assert.equal(r.risk, 'LOW');
+});
+
+test('SafeTx self-call adding an owner is HIGH', () => {
+  const r = decode(safeTx({ to: SAFE, operation: 0, data: '0x0d582f13' + '0'.repeat(128) }));
+  assert.equal(r.risk, 'HIGH');
+  assert.ok(r.reasons.some((x) => /addOwnerWithThreshold/.test(x.reason)));
+});
