@@ -139,11 +139,27 @@ test('markdown report renders', () => {
 
 // ---------- Safe SafeTx ----------
 const SAFE = '0x1db92e2eebc8e0c075a02bea49a2935bcd2dfcf4';
+const MULTISEND_CALL_ONLY = '0x40A2aCCbd92BCA938b02010E17A5b8929b49130D';
+const MULTISEND_PLAIN = '0xA238CBeb142c10Ef7Ad8442C6D1f9E89e07e7761';
 const safeTx = (msg) => ({
   types: { SafeTx: [] }, primaryType: 'SafeTx',
   domain: { chainId: 1, verifyingContract: SAFE },
   message: { value: 0, data: '0x', safeTxGas: 0, baseGas: 0, gasPrice: 0, gasToken: '0x0000000000000000000000000000000000000000', refundReceiver: '0x0000000000000000000000000000000000000000', nonce: 71, ...msg },
 });
+
+const encodeMultiSend = (steps) => {
+  const packed = steps.map(({ operation = 0, to, value = 0n, data = '0x' }) => {
+    const d = data.replace(/^0x/, '');
+    return Number(operation).toString(16).padStart(2, '0')
+      + to.replace(/^0x/, '').toLowerCase().padStart(40, '0')
+      + BigInt(value).toString(16).padStart(64, '0')
+      + (d.length / 2).toString(16).padStart(64, '0')
+      + d;
+  }).join('');
+  const byteLen = (packed.length / 2).toString(16).padStart(64, '0');
+  const padded = packed.padEnd(Math.ceil(packed.length / 64) * 64 || 64, '0');
+  return '0x8d80ff0a' + '20'.padStart(64, '0') + byteLen + padded;
+};
 
 test('SafeTx delegatecall to an unknown contract is HIGH on its own', () => {
   const r = decode(safeTx({ to: EVIL, operation: 1, data: '0xa9059cbb' + '0'.repeat(128) }));
@@ -152,10 +168,45 @@ test('SafeTx delegatecall to an unknown contract is HIGH on its own', () => {
   assert.ok(r.reasons.some((x) => /delegatecall/.test(x.reason)));
 });
 
-test('SafeTx delegatecall into MultiSendCallOnly is not HIGH', () => {
-  const r = decode(safeTx({ to: '0x40A2aCCbd92BCA938b02010E17A5b8929b49130D', operation: 1, data: '0x8d80ff0a' }));
+test('SafeTx delegatecall into MultiSendCallOnly with clean transfers is LOW', () => {
+  const data = encodeMultiSend([
+    { operation: 0, to: ME, value: 1000000000000000n, data: '0x' },
+    { operation: 0, to: EVIL, value: 2000000000000000n, data: '0x' },
+  ]);
+  const r = decode(safeTx({ to: MULTISEND_CALL_ONLY, operation: 1, data }));
   assert.equal(r.kind, 'safe-tx');
-  assert.notEqual(r.risk, 'HIGH');
+  assert.equal(r.risk, 'LOW');
+  assert.ok(r.facts.some(([k, v]) => k === 'batch steps' && v === '2'));
+});
+
+test('SafeTx MultiSendCallOnly batch hiding addOwnerWithThreshold on the Safe is HIGH', () => {
+  const data = encodeMultiSend([
+    { operation: 0, to: ME, value: 1000n, data: '0x' },
+    { operation: 0, to: SAFE, value: 0n, data: '0x0d582f13' + '0'.repeat(128) },
+  ]);
+  const r = decode(safeTx({ to: MULTISEND_CALL_ONLY, operation: 1, data }));
+  assert.equal(r.risk, 'HIGH');
+  assert.ok(r.reasons.some((x) => /step #2:.*addOwnerWithThreshold/.test(x.reason)));
+});
+
+test('SafeTx MultiSendCallOnly batch hiding an unlimited approve is HIGH', () => {
+  const pad = (h) => h.replace(/^0x/, '').padStart(64, '0');
+  const approveData = '0x095ea7b3' + pad(EVIL) + 'f'.repeat(64);
+  const data = encodeMultiSend([
+    { operation: 0, to: '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48', value: 0n, data: approveData },
+  ]);
+  const r = decode(safeTx({ to: MULTISEND_CALL_ONLY, operation: 1, data }));
+  assert.equal(r.risk, 'HIGH');
+  assert.ok(r.reasons.some((x) => /step #1:.*unlimited allowance/.test(x.reason)));
+});
+
+test('SafeTx MultiSend batch with a nested delegatecall step is HIGH', () => {
+  const data = encodeMultiSend([
+    { operation: 1, to: EVIL, value: 0n, data: '0xdeadbeef' },
+  ]);
+  const r = decode(safeTx({ to: MULTISEND_PLAIN, operation: 1, data }));
+  assert.equal(r.risk, 'HIGH');
+  assert.ok(r.reasons.some((x) => /step #1:.*delegatecall/.test(x.reason)));
 });
 
 test('SafeTx plain call (operation 0) with no data is LOW', () => {

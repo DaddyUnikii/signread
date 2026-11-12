@@ -132,6 +132,83 @@ export function decodeTypedData(td, opts = {}) {
 // its own storage (owners, modules, guard, implementation). This is how Bybit lost
 // ~$1.5B in Feb 2025: signers approved what looked like a routine transfer.
 const ZERO = '0x0000000000000000000000000000000000000000';
+const MULTISEND = '0x8d80ff0a';
+
+// Unpacks Safe multiSend(bytes transactions) calldata (selector 0x8d80ff0a).
+// Each step is tightly packed: operation (1B) | to (20B) | value (32B) | dataLength (32B) | data (dataLength B).
+export function unpackMultiSend(data) {
+  const h = lc(data || '');
+  if (!h.startsWith(MULTISEND) || h.length < 10 + 128) return null;
+  let offset;
+  try { offset = Number(BigInt('0x' + h.slice(10, 74))); } catch { return null; }
+  const lenPos = 10 + offset * 2;
+  if (!Number.isSafeInteger(lenPos) || lenPos < 10 || lenPos + 64 > h.length) return null;
+  let byteLen;
+  try { byteLen = Number(BigInt('0x' + h.slice(lenPos, lenPos + 64))); } catch { return null; }
+  const blobStart = lenPos + 64;
+  const blobEnd = blobStart + byteLen * 2;
+  if (!Number.isSafeInteger(byteLen) || byteLen < 0 || blobEnd > h.length) return null;
+  const blob = h.slice(blobStart, blobEnd);
+  const steps = [];
+  let i = 0;
+  while (i < blob.length) {
+    if (i + 170 > blob.length) return null;
+    const op = parseInt(blob.slice(i, i + 2), 16);
+    const to = '0x' + blob.slice(i + 2, i + 42);
+    const value = BigInt('0x' + blob.slice(i + 42, i + 106));
+    const dataLen = Number(BigInt('0x' + blob.slice(i + 106, i + 170)));
+    const end = i + 170 + dataLen * 2;
+    if (!Number.isSafeInteger(dataLen) || dataLen < 0 || end > blob.length) return null;
+    steps.push({ op, to, value, data: '0x' + blob.slice(i + 170, end) });
+    i = end;
+  }
+  return steps;
+}
+
+function checkSafeStep(r, safe, step, prefix = '', depth = 0) {
+  const op = Number(step.op);
+  const to = lc(step.to);
+  const data = lc(step.data || '0x');
+  const sel = data.length >= 10 ? data.slice(0, 10) : '0x';
+  const lib = SAFE_MULTISEND[to];
+  const tag = prefix ? `${prefix}: ` : '';
+
+  if (op === 1) {
+    if (!lib) bump(r, 'HIGH', `${tag}delegatecall to a contract that is not a Safe MultiSend library: it runs with full control of the Safe and can replace owners or the implementation`);
+    else if (!lib.callOnly) bump(r, 'MEDIUM', `${tag}delegatecall into ${lib.name}; batched steps can delegatecall again, so check each one`);
+    else if (!prefix) bump(r, 'LOW', `delegatecall into ${lib.name}, the standard way to batch calls`);
+  } else if (op !== 0) {
+    bump(r, 'HIGH', `${tag}unknown operation ${step.op}`);
+  }
+
+  if (lib || sel === MULTISEND) {
+    if (depth >= 3) {
+      bump(r, 'HIGH', `${tag}deeply nested multiSend batch`);
+      return;
+    }
+    const steps = sel === MULTISEND ? unpackMultiSend(data) : null;
+    if (!steps || !steps.length) {
+      bump(r, 'MEDIUM', `${tag}multiSend payload could not be unpacked; inspect raw data`);
+    } else {
+      r.facts.push([prefix ? `${prefix} batch steps` : 'batch steps', String(steps.length)]);
+      steps.forEach((s, idx) => {
+        const sSel = s.data.length >= 10 ? s.data.slice(0, 10) : '0x';
+        const fn = sSel === MULTISEND ? 'multiSend' : SAFE_ADMIN[sSel] || SELECTORS[sSel]?.name || (sSel === '0x' ? 'transfer' : sSel);
+        const stepLabel = prefix ? `${prefix}.${idx + 1}` : `step #${idx + 1}`;
+        r.facts.push([stepLabel, `${s.op === 1 ? 'DELEGATECALL' : 'call'} ${who(s.to)} (${fn})`]);
+        checkSafeStep(r, safe, s, stepLabel, depth + 1);
+      });
+    }
+    return;
+  }
+
+  const self = safe && to === safe;
+  if (SAFE_ADMIN[sel] && (self || op === 1)) bump(r, 'HIGH', `${tag}${SAFE_ADMIN[sel]} changes who controls this Safe or what code it runs`);
+  if (SELECTORS[sel] && ['approve', 'setApprovalForAll', 'increaseAllowance', 'Permit2.approve', 'transferOwnership'].includes(SELECTORS[sel].name)) {
+    const inner = decodeCalldata({ to: step.to, data });
+    for (const x of inner.reasons) if (x.level !== 'LOW') bump(r, x.level, `${tag || 'inner call: '}${x.reason}`);
+  }
+}
 
 function decodeSafeTx(d, m) {
   const op = Number(m.operation);
@@ -142,28 +219,20 @@ function decodeSafeTx(d, m) {
   const r = base('safe-tx', `Safe transaction: ${op === 1 ? 'DELEGATECALL into' : 'call to'} ${lib ? lib.name : m.to}`);
   r.facts.push(['to', lib ? `${m.to} (${lib.name})` : who(m.to)], ['operation', op === 1 ? '1 (delegatecall)' : `${op} (call)`]);
   if (m.value !== undefined && BigInt(m.value) > 0n) r.facts.push(['native value (wei)', BigInt(m.value).toString()]);
-  if (sel !== '0x') r.facts.push(['function', SAFE_ADMIN[sel] || SELECTORS[sel]?.name || sel]);
+  if (sel !== '0x') r.facts.push(['function', sel === MULTISEND ? 'multiSend' : SAFE_ADMIN[sel] || SELECTORS[sel]?.name || sel]);
 
-  if (op === 1) {
-    if (!lib) bump(r, 'HIGH', 'delegatecall to a contract that is not a Safe MultiSend library: it runs with full control of the Safe and can replace owners or the implementation');
-    else if (!lib.callOnly) bump(r, 'MEDIUM', `delegatecall into ${lib.name}; batched steps can delegatecall again, so check each one`);
-    else bump(r, 'LOW', `delegatecall into ${lib.name}, the standard way to batch calls`);
-  } else if (op !== 0) {
-    bump(r, 'HIGH', `unknown operation ${m.operation}`);
-  }
+  checkSafeTxStep(r, d, m);
+  return r;
+}
 
-  const self = d.verifyingContract && to === lc(d.verifyingContract);
-  if (SAFE_ADMIN[sel] && (self || op === 1)) bump(r, 'HIGH', `${SAFE_ADMIN[sel]} changes who controls this Safe or what code it runs`);
-  if (SELECTORS[sel] && ['approve', 'setApprovalForAll', 'increaseAllowance', 'Permit2.approve'].includes(SELECTORS[sel].name)) {
-    const inner = decodeCalldata({ to: m.to, data });
-    for (const x of inner.reasons) if (x.level !== 'LOW') bump(r, x.level, `inner call: ${x.reason}`);
-  }
+function checkSafeTxStep(r, d, m) {
+  const safe = lc(d.verifyingContract);
+  checkSafeStep(r, safe, { op: m.operation, to: m.to, value: BigInt(m.value ?? 0), data: m.data });
   if (BigInt(m.gasPrice ?? 0) > 0n && m.refundReceiver && lc(m.refundReceiver) !== ZERO) {
     r.facts.push(['refund receiver', who(m.refundReceiver)]);
     bump(r, 'MEDIUM', 'pays a gas refund out of the Safe to a third party');
   }
   if (!r.reasons.length) bump(r, 'LOW', 'plain call from the Safe; check the recipient and amount');
-  return r;
 }
 
 // ---------- personal_sign ----------
