@@ -59,7 +59,7 @@ is good at (explaining in your language) and out of the part that must be exact.
 |---|---|
 | EIP-2612 / DAI `Permit` | unlimited value, unknown spender, deadline that never expires |
 | Permit2 `PermitSingle` / `PermitBatch` / `PermitTransferFrom` | unlimited amounts, multi-token batches, long expirations |
-| Safe `SafeTx` | `operation: 1` (delegatecall) into anything but a Safe MultiSend library, owner/module/guard/implementation changes, inner approvals, third-party gas refunds |
+| Safe `SafeTx` | `operation: 1` (delegatecall) into anything but a Safe MultiSend library, unpacked `multiSend(bytes)` batches, owner/module/guard/implementation changes, inner approvals, third-party gas refunds |
 | Seaport `OrderComponents` | items listed for nothing, payouts to someone else, endless orders |
 | any other EIP-712 | unknown spender/operator fields, unlimited amounts, `approved: true`, chain id mismatch |
 | `personal_sign` | blind 32-byte hashes, unreadable bytes, SIWE domain mismatch (`--origin`), seed-phrase bait |
